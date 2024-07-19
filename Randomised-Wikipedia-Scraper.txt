@@ -1,0 +1,100 @@
+import requests
+from bs4 import BeautifulSoup
+import random
+import time
+import time
+import sys
+import re
+import json
+import unicodedata
+#import libraries
+
+numfilter = re.compile('\[[0-9]+\]')
+letterfilter = re.compile('\[[A-Za-z]+\]')
+#define regexes
+
+file = open('forbidden_ends.txt', 'r', encoding = 'utf-8', errors = 'ignore')
+forbidden_ends = file.read()
+forbidden_ends = forbidden_ends.replace('Disallow: /wiki/', '').split('\n')
+#open the file of forbidden endings as per robots.txt and difficult wiki links to work with
+
+
+def scrapeWikiArticle(url, forbidden_ends, numfilter, letterfilter):
+    retry = 0
+    reset = 0
+    request = requests.get(url)
+    soup = BeautifulSoup(request.content, 'html.parser')
+    title = soup.find(id="firstHeading")#make soup object
+    print(title.text,)#prints the text so we can keep track of stuff
+    allLinks= soup.find(id='bodyContent').find_all('a')#find all of the links within the page
+    random.shuffle(allLinks)#shuffle them randomly
+    for link in allLinks:
+        try:
+            if not ('/wiki/' in link['href']):#remove links that do not direct back to wikipedia
+                allLinks.remove(link)
+                if allLinks == []:
+                    print('Ran out of links')
+                    scrapeWikiArticle(url = 'https://en.wikipedia.org/wiki/Wikipedia:Contents/A%E2%80%93Z_index', forbidden_ends = forbidden_ends, numfilter = numfilter, letterfilter = letterfilter)
+                continue
+            else:
+                pass
+        except:
+            allLinks.remove(link)
+            if allLinks == []:
+                print('Ran out of links')
+                scrapeWikiArticle(url = 'https://en.wikipedia.org/wiki/Wikipedia:Contents/A%E2%80%93Z_index', forbidden_ends = forbidden_ends, numfilter = numfilter, letterfilter = letterfilter)
+            else:
+                continue
+
+        if '.svg' in link['href']:#.svg files are annoying for some reason??
+            allLinks.remove(link)
+            continue
+        else:
+            pass
+        string_link = link['href']#want to find href 
+        idx = string_link.index('/wiki/')#indexing after the /wiki/ bit
+        end = string_link[idx+6: len(string_link)]#capture the end of the string
+        for x in forbidden_ends:#want to iterate through the forbidden endings
+            if x in end:
+                try:
+                    allLinks.remove(link)#we want to remove this bad link from the list of available links
+                    if allLinks == []:
+                        scrapeWikiArticle(url = 'https://en.wikipedia.org/wiki/Wikipedia:Contents/A%E2%80%93Z_index', forbidden_ends = forbidden_ends, numfilter = numfilter, letterfilter = letterfilter)
+                    else:
+                        continue
+                    retry = 1 #activates the retry, we want to now go back to the start of the for loop and select another link to try after this.
+                    break
+                except:
+                    print('UH OH!!!!', link, 'CAN\'T BE REMOVED WITH ', x, 'WHERE THE LINK IS', link['href'])#error message in case something bypasses this list
+                    reset = 1#activates the reset - we go back to the start
+            else:
+                continue
+        if retry != 0:
+            continue
+        if reset !=0:
+            scrapeWikiArticle(url = 'https://en.wikipedia.org/wiki/Wikipedia:Contents/A%E2%80%93Z_index', forbidden_ends = forbidden_ends, numfilter = numfilter, letterfilter = letterfilter)
+    write_to_file(link = link, soup = soup, numfilter=numfilter , letterfilter = letterfilter)#now we write the data to the txt files that we want
+    scrapeWikiArticle(url = "https://en.wikipedia.org/wiki/"+end, forbidden_ends = forbidden_ends, numfilter = numfilter, letterfilter = letterfilter)
+
+def write_to_file(link, soup, numfilter, letterfilter):
+    key = str(soup.find(id = 'firstHeading').text)#find the 'key', the title of the body of text
+    with open('keyfile.txt', 'r') as keyfile:#just want to check and see if there are any duplicates in the file
+        if key in keyfile.read():
+            exit#if there are, we exit this function, and so we do not duplicate
+        else:
+            with open('keyfile.txt', 'a') as keyfile_write:#if is not a duplicate, we add this to the txt file, in a list format so we can easily retrieve using regexes later.
+                keyfile_write.write(str([key]))
+                keyfile_write.write(',')
+    transfer = ''#define some empty string transfer, where we are going to put all of the data from the main body of the webpage.
+    for k in soup.find_all('p'):
+        k = re.sub(numfilter, '', k.get_text())#filter out the number bracket reference markers
+        k = re.sub(letterfilter, '', k)#filter out the words inside such markers
+        k = unicodedata.normalize("NFKD", k)#tries to store some of the nonstandard unicode characters
+        transfer = transfer + ' ' + k #concatenate to the end of the previous string, and separate with spacec
+    with open('writefile.txt', 'a') as writefile:
+        json.dump([transfer], writefile)# dump this in the file
+        writefile.write(',')#and separate with a comma for retrieval reasons.
+
+
+
+scrapeWikiArticle(url = 'https://en.wikipedia.org/wiki/Wikipedia:Contents/A%E2%80%93Z_index', forbidden_ends = forbidden_ends, numfilter=numfilter, letterfilter=letterfilter)
